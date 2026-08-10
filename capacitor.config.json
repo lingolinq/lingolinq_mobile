@@ -23,6 +23,10 @@
     },
     "Keyboard": {
       "resize": "body"
+    },
+    "CapacitorSQLite": {
+      "androidIsEncryption": false,
+      "iosIsEncryption": false
     }
   }
 }
