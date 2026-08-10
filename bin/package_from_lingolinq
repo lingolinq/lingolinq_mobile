@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+# Copy LingoLinq Ember assets into this Capacitor www/ tree and set api_host.
+#
+# Sources (first match wins):
+#   PACKAGE_SOURCE=prod  — download fingerprinted assets from PACKAGE_PROD_HOST
+#   default              — copy from $LINGOLINQ_ROOT/public/assets/application-*.{js,css}
+#
+# API host written into www/init.js:
+#   LINGOLINQ_API_HOST=http://localhost:5000   — local Rails (recommended for native dev)
+#   unset / empty                              — https://app.lingolinq.com (prod)
+#
+# The local public/assets tree is often incomplete (Sprockets without vendor). We refuse
+# to package a bundle that is missing ember-inflector AMD modules.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+LL="${LINGOLINQ_ROOT:-$(cd "$ROOT/../LingoLinq" && pwd)}"
+WWW="$ROOT/www"
+PROD_HOST="${PACKAGE_PROD_HOST:-https://app.lingolinq.com}"
+SOURCE="${PACKAGE_SOURCE:-local}"
+API_HOST="${LINGOLINQ_API_HOST:-https://app.lingolinq.com}"
+# domain_settings + asset downloads: when pointing at local Rails, fetch config from there too.
+SETTINGS_HOST="$API_HOST"
+if [[ "$API_HOST" == "https://app.lingolinq.com" ]]; then
+  SETTINGS_HOST="$PROD_HOST"
+fi
+
+mkdir -p "$WWW/images/logos" "$WWW/images/emergency" "$WWW/fonts" "$WWW/assets/icons" "$WWW/locales" "$WWW/css"
+cp "$LL"/public/images/* "$WWW/images/" 2>/dev/null || true
+cp "$LL"/public/images/logos/* "$WWW/images/logos/" 2>/dev/null || true
+cp "$LL"/public/images/emergency/* "$WWW/images/emergency/" 2>/dev/null || true
+cp "$LL"/public/fonts/* "$WWW/fonts/" 2>/dev/null || true
+cp "$LL"/public/icons/* "$WWW/assets/icons/" 2>/dev/null || true
+cp "$LL"/public/locales/* "$WWW/locales/" 2>/dev/null || true
+
+package_from_local() {
+  local js css
+  js="$(ls "$LL"/public/assets/application-*.js 2>/dev/null | head -1 || true)"
+  css="$(ls "$LL"/public/assets/application-*.css 2>/dev/null | head -1 || true)"
+  if [[ -z "${js:-}" || -z "${css:-}" ]]; then
+    echo "Missing public/assets/application-*.{js,css} in $LL — run a production asset build, or PACKAGE_SOURCE=prod." >&2
+    exit 1
+  fi
+  cp "$js" "$WWW/app.js"
+  cp "$css" "$WWW/css/app.css"
+  echo "Packaged local $js and $css"
+}
+
+package_from_prod() {
+  local html js_path css_path
+  html="$(mktemp)"
+  curl -fsSL "$PROD_HOST/login" -o "$html"
+  js_path="$(rg -o '/assets/application-[a-f0-9]+\.js' "$html" | head -1 || true)"
+  css_path="$(rg -o '/assets/application-[a-f0-9]+\.css' "$html" | head -1 || true)"
+  rm -f "$html"
+  if [[ -z "${js_path:-}" || -z "${css_path:-}" ]]; then
+    echo "Could not find application-*.{js,css} links on $PROD_HOST/login" >&2
+    exit 1
+  fi
+  curl -fsS "$PROD_HOST$js_path" -o "$WWW/app.js"
+  curl -fsS "$PROD_HOST$css_path" -o "$WWW/css/app.css"
+  echo "Packaged prod $PROD_HOST$js_path and $PROD_HOST$css_path"
+}
+
+if [[ "$SOURCE" == "prod" ]]; then
+  package_from_prod
+else
+  package_from_local
+fi
+
+# Refuse incomplete Sprockets outputs (missing vendor / ember-inflector).
+python3 - <<PY
+from pathlib import Path
+js = Path("$WWW/app.js").read_text(errors="ignore")
+marker = 'define("ember-inflector/index"'
+if marker not in js:
+    raise SystemExit(
+        "Packaged www/app.js is incomplete (missing ember-inflector AMD modules). "
+        "Your local public/assets build likely omitted vendor.js. "
+        "Re-run with: PACKAGE_SOURCE=prod npm run package"
+    )
+print("asset check OK: ember-inflector present, size", Path("$WWW/app.js").stat().st_size)
+PY
+
+if curl -fsS "$SETTINGS_HOST/api/v1/domain_settings" -o /tmp/domain_settings.json; then
+  python3 - <<PY
+import json
+from pathlib import Path
+from urllib.parse import urlparse
+raw = json.loads(Path('/tmp/domain_settings.json').read_text())
+sub = raw.get('settings') or {}
+merged = {**sub, **raw}
+host = urlparse("$API_HOST").netloc or merged.get('host') or 'localhost:5000'
+merged['host'] = host
+Path("$WWW/domain_settings.js").write_text(
+    'window.domain_settings=' + json.dumps(merged, indent=2) + ';\n'
+)
+print('wrote domain_settings.js from', "$SETTINGS_HOST", 'host=', host)
+PY
+else
+  echo "WARN: could not fetch domain_settings from $SETTINGS_HOST; rewriting host on existing file if present" >&2
+  python3 - <<PY
+import json, re
+from pathlib import Path
+from urllib.parse import urlparse
+path = Path("$WWW/domain_settings.js")
+host = urlparse("$API_HOST").netloc or 'localhost:5000'
+if path.exists():
+    text = path.read_text()
+    m = re.search(r'window\.domain_settings\s*=\s*(\{.*\})\s*;', text, re.S)
+    if m:
+        data = json.loads(m.group(1))
+        data['host'] = host
+        path.write_text('window.domain_settings=' + json.dumps(data, indent=2) + ';\n')
+        print('updated domain_settings.js host to', host)
+PY
+fi
+
+python3 - <<PY
+import re
+from pathlib import Path
+init = Path("$WWW/init.js")
+text = init.read_text()
+api_host = "$API_HOST"
+# Normalize legacy coughdrop host, then set the active api_host.
+text = text.replace('https://app.mycoughdrop.com', 'https://app.lingolinq.com')
+if not re.search(r'api_host\s*:\s*"', text):
+    raise SystemExit('www/init.js missing api_host — restore bootstrap init.js')
+text, n = re.subn(
+    r'api_host\s*:\s*"[^"]*"',
+    'api_host: "{}"'.format(api_host),
+    text,
+    count=1,
+)
+if n != 1:
+    raise SystemExit('failed to rewrite api_host in www/init.js')
+init.write_text(text)
+html = Path("$WWW/index.html").read_text()
+if 'ember-application-root' not in html:
+    raise SystemExit('www/index.html missing #ember-application-root — restore bootstrap HTML')
+print('bootstrap checks OK; api_host =', api_host)
+PY
+
+echo "Next: npx cap sync android   (or npm run sync:android / sync:android:local)"

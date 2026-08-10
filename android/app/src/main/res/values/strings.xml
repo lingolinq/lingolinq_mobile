@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">LingoLinq</string>
+    <string name="title_activity_main">LingoLinq</string>
+    <string name="package_name">com.lingolinq.app</string>
+    <string name="custom_url_scheme">com.lingolinq.app</string>
+</resources>

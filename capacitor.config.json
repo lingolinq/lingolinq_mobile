@@ -1,0 +1,28 @@
+{
+  "appId": "com.lingolinq.app",
+  "appName": "LingoLinq",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": [
+      "app.lingolinq.com",
+      "*.lingolinq.com",
+      "*.lingolinq-aac.com",
+      "localhost",
+      "127.0.0.1",
+      "10.0.2.2"
+    ]
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SplashScreen": {
+      "launchAutoHide": true,
+      "backgroundColor": "#ffffff"
+    },
+    "Keyboard": {
+      "resize": "body"
+    }
+  }
+}
