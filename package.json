@@ -17,6 +17,7 @@
   "license": "AGPL-3.0-or-later",
   "description": "LingoLinq Capacitor 7 native shell (Android/iOS)",
   "dependencies": {
+    "@capacitor-community/sqlite": "^7.0.3",
     "@capacitor-community/text-to-speech": "^6.1.0",
     "@capacitor/android": "^7.6.8",
     "@capacitor/app": "^7.1.2",
@@ -25,6 +26,7 @@
     "@capacitor/clipboard": "^7.0.4",
     "@capacitor/core": "^7.6.8",
     "@capacitor/device": "^7.0.5",
+    "@capacitor/filesystem": "^7.1.8",
     "@capacitor/ios": "^7.6.8",
     "@capacitor/keyboard": "^7.0.6",
     "@capacitor/network": "^7.0.4",
