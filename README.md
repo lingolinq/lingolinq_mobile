@@ -1,92 +1,223 @@
 # LingoLinq Mobile (Capacitor 7)
 
-Native Android/iOS shell for the LingoLinq AAC web app. Wraps Ember assets in Capacitor 7.
+Native Android/iOS shell for the LingoLinq AAC web app. This repo wraps packaged Ember assets in Capacitor 7 and talks to a LingoLinq Rails API (local or production).
 
 **App ID:** `com.lingolinq.app`  
-**Sibling of:** `LingoLinq` / `LingoLinq-AAC` monorepo (not inside it)
+**License:** AGPL-3.0-or-later
 
-## Kickoff definition of done
+## How this relates to the LingoLinq monorepo
 
-- [x] Capacitor 7 project with Android + iOS platforms
-- [x] Packaged Ember `application-*.{js,css}` into `www/`
-- [x] Bootstrap: `#ember-application-root`, `api_host`, `domain_settings.js`
-- [x] Official Capacitor plugins synced
-- [x] `assembleDebug` produces `android/app/build/outputs/apk/debug/app-debug.apk`
-- [ ] Install on a device/emulator and confirm login / public board load
+These are **sibling checkouts**, not a nested package:
+
+```text
+repos/
+  LingoLinq/            # Rails + Ember (source of truth for app JS/CSS + API)
+  lingolinq_mobile/     # this repo — Capacitor shell that loads packaged Ember
+```
+
+| Change lives in… | Examples |
+|------------------|----------|
+| **LingoLinq** | Ember UI, speak mode, API clients, `capacitor_bridge.js`, Rails endpoints |
+| **lingolinq_mobile** | Capacitor config, native plugins, Android/iOS projects, packaging/`www` bootstrap |
+
+Default packaging looks for the monorepo at `../LingoLinq`. Override if your layout differs:
+
+```bash
+export LINGOLINQ_ROOT=/path/to/LingoLinq
+```
+
+Deeper kickoff notes and bridge inventory live in the monorepo:
+
+- `LingoLinq/docs/native-apps/capacitor-7-kickoff.md`
+- `LingoLinq/docs/native-apps/native-bridge-inventory.md`
+
+Monorepo adapter worth knowing about:
+
+- `LingoLinq/app/frontend/app/utils/capacitor_bridge.js` — Capacitor bootstrap + IAP gate
+- Wired from `capabilities.js` / `subscription.js` on a Capacitor feature branch (e.g. `feat/melissa-capacitor-7-kickoff`)
 
 ## Prerequisites
 
-- Node 20+ (22 preferred; matches LingoLinq)
-- JDK **21** (Capacitor 7). Portable Temurin works, e.g. `~/.local/jdk/jdk-21*`
-- Android SDK with platform **35** + build-tools (Android Studio Ladybug+)
-- Sibling checkout: `../LingoLinq` with `public/assets/application-*.{js,css}` present **or** use `PACKAGE_SOURCE=prod`
+| Need | Notes |
+|------|--------|
+| Node 20+ (22 preferred) | Matches LingoLinq |
+| Sibling `LingoLinq` checkout | For local images/locales and optional local asset builds |
+| JDK **21** | Capacitor 7 / Android Gradle |
+| Android SDK platform **35** | Android Studio Ladybug+ |
+| macOS + Xcode | **Required to build iOS** (cannot compile iOS from Linux/WSL) |
+| CocoaPods | iOS deps (`pod install` via `npx cap sync ios`) |
 
 ```bash
-export JAVA_HOME="$HOME/.local/jdk/jdk-21.0.12+8"   # adjust version dir
+export JAVA_HOME="$HOME/.local/jdk/jdk-21.0.12+8"   # adjust
 export ANDROID_HOME="$HOME/Android/Sdk"            # or Windows SDK under /mnt/c/...
 export PATH="$JAVA_HOME/bin:$ANDROID_HOME/platform-tools:$PATH"
 ```
 
-## Local development (talk to your Rails on :5000)
-
-Do **not** leave `api_host` on `https://app.lingolinq.com` while iterating — that hits production DB.
-
-1. Start local Rails as usual (`bin/fresh_start` / `rails s` on port **5000**).
-2. Package + sync the shell against localhost:
-
 ```bash
-cd /home/melis/repos/lingolinq_mobile
-npm run sync:android:local
-# writes capabilities.api_host = "http://localhost:5000" into www/init.js
+cd /path/to/lingolinq_mobile
+npm install
 ```
 
-3. Forward the device/emulator port to your host (required so `localhost:5000` inside the app reaches WSL/host Rails):
+## Typical day: develop with local LingoLinq
+
+Goal: native app uses **your** Rails on port **5000** (same DB as the webapp), not `app.lingolinq.com`.
+
+### 1. Run LingoLinq locally
+
+In the monorepo, start Rails the way you usually do for web (`bin/fresh_start`, Foreman, etc.) so API is at:
+
+`http://localhost:5000`
+
+Ember on `:8184` is optional for native work; the Capacitor WebView loads packaged assets from `www/`, not the Ember dev server.
+
+### 2. Package + sync the shell (local API)
+
+```bash
+cd /path/to/lingolinq_mobile
+
+# Android (WSL / Linux / macOS)
+npm run sync:android:local
+
+# iOS (macOS only)
+npm run sync:ios:local
+```
+
+What that does:
+
+1. Downloads a complete Ember bundle (`PACKAGE_SOURCE=prod` by default for `:local` scripts — local Sprockets trees often omit vendor / `ember-inflector`).
+2. Sets `www/init.js` → `capabilities.api_host = "http://localhost:5000"`.
+3. Fetches `domain_settings` from that API host when reachable.
+4. Runs `npx cap sync` so `android/` / `ios/` pick up `www/`.
+
+Confirm before installing:
+
+```bash
+grep api_host www/init.js
+# expect: api_host: "http://localhost:5000"
+```
+
+### 3. Reach host Rails from the device/emulator
+
+Inside the app, `localhost` is the **phone/emulator**, not your laptop. Forward the port:
 
 ```bash
 adb reverse tcp:5000 tcp:5000
 ```
 
-4. Build/install the debug APK (Android Studio or `./gradlew assembleDebug`).
+Re-run `adb reverse` after reconnecting a device or restarting the emulator.
 
-### Alternatives
-
-| Target | `LINGOLINQ_API_HOST` | Notes |
-|--------|----------------------|--------|
-| Host loopback via adb (recommended) | `http://localhost:5000` | Needs `adb reverse tcp:5000 tcp:5000` |
-| Android emulator without reverse | `http://10.0.2.2:5000` | Rails must listen on `0.0.0.0:5000` |
-| Physical device on Wi‑Fi | `http://<your-lan-ip>:5000` | Same bind note; debug cleartext allowed |
-
-Override any time:
+| Situation | `LINGOLINQ_API_HOST` | Notes |
+|-----------|----------------------|--------|
+| Recommended (adb reverse) | `http://localhost:5000` | What `*:local` scripts use |
+| Android emulator, no reverse | `http://10.0.2.2:5000` | Bind Rails on `0.0.0.0:5000` |
+| Physical device on Wi‑Fi | `http://<lan-ip>:5000` | Same bind note; debug cleartext allowed |
 
 ```bash
 LINGOLINQ_API_HOST=http://10.0.2.2:5000 PACKAGE_SOURCE=prod npm run package
 npx cap sync android
 ```
 
-`package:local` still uses `PACKAGE_SOURCE=prod` for the Ember bundle (local Sprockets trees are often missing vendor). Point only the **API** at localhost.
+### 4. Build / run
+
+**Android**
+
+```bash
+cd android && ./gradlew assembleDebug
+# APK: android/app/build/outputs/apk/debug/app-debug.apk
+
+# or
+npx cap open android
+npx cap run android
+```
+
+**iOS (Mac only)**
+
+```bash
+npm run sync:ios:local
+npx cap open ios
+# Build/run a simulator or device from Xcode
+```
+
+### 5. When you change Ember / Capacitor bridge code in LingoLinq
+
+Packaged `www/app.js` is a **snapshot**. After meaningful frontend changes:
+
+1. Land/build the change in `LingoLinq` (and use a full asset build, or keep `PACKAGE_SOURCE=prod` until local precompile is complete).
+2. Re-run `npm run sync:android:local` (or `:ios:local`).
+3. Rebuild/reinstall the native app.
+
+Bootstrap-only files you edit in **this** repo (`www/init.js`, `www/tts_bridge.js`, `www/index.html`) still need `npx cap sync …` after changes.
+
+Shell-only changes (plugins, `capacitor.config.json`, AndroidManifest) → sync + native rebuild; no monorepo package required unless `www/` also changed.
 
 ## Production-pointing package
 
+Use when you intentionally want the installed app to call production:
+
 ```bash
-npm install
-npm run package          # api_host → https://app.lingolinq.com
-npx cap sync android
-cd android && ./gradlew assembleDebug
+npm run sync:android    # api_host → https://app.lingolinq.com
+# or
+npm run sync:ios
 ```
+
+Do **not** use this while iterating against a local DB.
+
+## Packaging reference
+
+| Script | API host | Ember assets |
+|--------|----------|--------------|
+| `npm run package:local` | `http://localhost:5000` | prod download (`PACKAGE_SOURCE=prod`) |
+| `npm run package` | `https://app.lingolinq.com` | local `public/assets` unless `PACKAGE_SOURCE=prod` |
+| `npm run sync:android:local` | local | `package:local` + `cap sync android` |
+| `npm run sync:ios:local` | local | `package:local` + `cap sync ios` |
+
+| Env var | Purpose | Default |
+|---------|---------|---------|
+| `LINGOLINQ_ROOT` | Path to monorepo | `../LingoLinq` |
+| `LINGOLINQ_API_HOST` | Written into `www/init.js` as `api_host` | `https://app.lingolinq.com` |
+| `PACKAGE_SOURCE` | `local` or `prod` Ember bundle | `local` (`prod` for `package:local`) |
+| `PACKAGE_PROD_HOST` | Host used when downloading prod assets | `https://app.lingolinq.com` |
+
+`bin/package_from_lingolinq` refuses incomplete local bundles (missing `ember-inflector` AMD modules). Fix with a full Rails asset precompile, or `PACKAGE_SOURCE=prod`.
+
+Gitignored build outputs (regenerated by package/sync): `www/app.js`, `www/css/app.css`, locales/fonts/images copies.
 
 ## Layout
 
 | Path | Role |
 |------|------|
-| `www/` | Web assets Capacitor loads |
-| `www/init.js` | Sets `capabilities.installed_app` + `api_host` before Ember |
-| `bin/package_from_lingolinq` | Copies Ember assets; rewrites `api_host` from `LINGOLINQ_API_HOST` |
-| `android/` / `ios/` | Native projects (`npx cap sync`) |
+| `www/` | Web assets Capacitor loads at runtime |
+| `www/init.js` | Sets `installed_app` + `api_host` before Ember boots |
+| `www/tts_bridge.js` | Android TTS shim (`speechSynthesis` is broken in System WebView) |
+| `www/domain_settings.js` | Branding/settings snapshot from API |
+| `bin/package_from_lingolinq` | Pulls Ember assets from LingoLinq or prod; rewrites `api_host` |
+| `capacitor.config.json` | App id, `CapacitorHttp`, allowNavigation |
+| `android/` | Android Studio / Gradle project |
+| `ios/` | Xcode project (build on macOS) |
+
+## WSL + Android Studio on Windows
+
+If Studio opens a Windows copy (e.g. `C:\Users\…\AndroidStudioProjects\lingolinq_mobile`), package/sync in WSL first, then refresh that mirror’s `www/` and `android/app/src/main/assets/` (and keep Windows `node_modules` via `npm ci` there). Opening the raw `\\wsl$\…` tree from Studio is fragile; prefer a synced NTFS project.
+
+## Gotchas
+
+- **Prod API in a “dev” APK** — `api_host` is baked at package time. Always `grep api_host www/init.js` after sync.
+- **Incomplete local assets** — ~9MB `application-*.js` can still miss vendor; symptom: `Could not find module ember-inflector`. Use `PACKAGE_SOURCE=prod` or a full precompile.
+- **CORS / “Can't Reach LingoLinq Cloud”** — keep `CapacitorHttp.enabled: true` in `capacitor.config.json`. Dev Rails CORS allows `localhost` and `capacitor://localhost`.
+- **TTS silence on Android** — System WebView does not implement working `speechSynthesis`; kickoff uses `@capacitor-community/text-to-speech` + `tts_bridge.js`.
+- **iOS from WSL** — `ios/` is in the repo, but you must sync/build on a Mac with Xcode.
+
+## Kickoff checklist
+
+- [x] Capacitor 7 + Android/iOS platforms
+- [x] Packaged Ember mount (`#ember-application-root`) + `api_host` bootstrap
+- [x] Official Capacitor plugins synced
+- [x] Debug APK builds
+- [ ] Device/emulator login + board load against **local** Rails
+- [ ] iOS simulator smoke test (on a Mac)
 
 ## Deferred (not kickoff)
 
 SQLite offline adapter, `@capacitor/filesystem`, custom `LingoLinqMisc` plugin, Acapela TTS, eye-gaze, IAP (v1.1). See `LingoLinq/docs/native-apps/native-bridge-inventory.md`.
 
-## Cordova
-
-Legacy Cordova shell (`coughdrop_mobile`) is reference-only. Do not extend it for store shipping.
+Legacy Cordova (`coughdrop_mobile`) is reference-only — do not extend it for store shipping.
