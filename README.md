@@ -244,6 +244,8 @@ If Studio opens a Windows copy (e.g. `C:\Users\…\AndroidStudioProjects\lingoli
 - [x] Capacitor 8: 16 KB page-size check on the built APK (`zipalign -c -P 16 -v 4`, and every `libsqlcipher.so` ABI has 16 KB LOAD alignment)
 - [x] Capacitor 8: `npx cap sync ios` with CocoaPods; `npx cap doctor` passes for Android and iOS
 - [ ] Capacitor 8: Xcode 26 build (Xcode 26 needs macOS Sequoia 15.6 or later)
+- [ ] Capacitor 8: layout on Android 14 and on Android 15 or later (status bar, bottom button row, keyboard); Capacitor 8 now applies system-bar insets by default
+- [ ] Capacitor 8: first iOS cold launch logs "Loading app at" once, not twice (the UIScene template sets a scene storyboard and also builds its own window)
 
 ## Deferred (not kickoff)
 
