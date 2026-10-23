@@ -1,6 +1,8 @@
-# LingoLinq Mobile (Capacitor 7)
+# LingoLinq Mobile (Capacitor 8)
 
-Native Android/iOS shell for the LingoLinq AAC web app. This repo wraps packaged Ember assets in Capacitor 7 and talks to a LingoLinq Rails API (local or production).
+Native Android/iOS shell for the LingoLinq AAC web app. This repo wraps packaged Ember assets in Capacitor 8 and talks to a LingoLinq Rails API (local or production).
+
+The shell moved from Capacitor 7 to Capacitor 8 in October 2026 because [Google Play requires](https://support.google.com/googleplay/android-developer/answer/11926878) new apps and app updates to target Android 16 (API level 36), and Capacitor 7 can only target API 35. See the [Capacitor 8 upgrade guide](https://capacitorjs.com/docs/updating/8-0) and Capacitor's [target SDK page](https://capacitorjs.com/docs/android/setting-target-sdk).
 
 **App ID:** `com.lingolinq.app`  
 **License:** AGPL-3.0-or-later
@@ -40,11 +42,11 @@ Monorepo adapter worth knowing about:
 
 | Need | Notes |
 |------|--------|
-| Node 20+ (22 preferred) | Matches LingoLinq |
+| Node **22+** | Required by Capacitor 8; matches LingoLinq's `.nvmrc` |
 | Sibling `LingoLinq` checkout | For local images/locales and optional local asset builds |
-| JDK **21** | Capacitor 7 / Android Gradle |
-| Android SDK platform **35** | Android Studio Ladybug+ |
-| macOS + Xcode | **Required to build iOS** (cannot compile iOS from Linux/WSL) |
+| JDK **21+** | Capacitor 8 requires 21 or higher; Android Studio's bundled runtime works |
+| Android SDK platform **36** | Android Studio Otter 2025.2.1+ |
+| macOS + Xcode **26+** | **Required to build iOS** (cannot compile iOS from Linux/WSL) |
 | CocoaPods | iOS deps (`pod install` via `npx cap sync ios`) |
 
 ```bash
@@ -230,7 +232,7 @@ If Studio opens a Windows copy (e.g. `C:\Users\…\AndroidStudioProjects\lingoli
 
 ## Kickoff checklist
 
-- [x] Capacitor 7 + Android/iOS platforms
+- [x] Capacitor 7 + Android/iOS platforms (moved to Capacitor 8, October 2026)
 - [x] Packaged Ember mount (`#ember-application-root`) + `api_host` bootstrap
 - [x] Official Capacitor plugins synced
 - [x] Debug APK builds
@@ -238,6 +240,10 @@ If Studio opens a Windows copy (e.g. `C:\Users\…\AndroidStudioProjects\lingoli
 - [ ] Device/emulator login + board load against **local** Rails
 - [ ] Offline smoke (airplane + cold start + speak with local symbols)
 - [ ] iOS simulator smoke test (on a Mac)
+- [x] Capacitor 8: `./gradlew assembleDebug bundleRelease` on SDK 36 (APK reports `targetSdkVersion:'36'`)
+- [x] Capacitor 8: 16 KB page-size check on the built APK (`zipalign -c -P 16 -v 4`, and every `libsqlcipher.so` ABI has 16 KB LOAD alignment)
+- [x] Capacitor 8: `npx cap sync ios` with CocoaPods; `npx cap doctor` passes for Android and iOS
+- [ ] Capacitor 8: Xcode 26 build (Xcode 26 needs macOS Sequoia 15.6 or later)
 
 ## Deferred (not kickoff)
 
