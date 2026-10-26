@@ -133,6 +133,13 @@
 
     return {
       executeSql: function(sql, params, success, error) {
+        // LingoLinq's sync calls the short form executeSql(sql, success, error), with no
+        // values, to check the database (services/persistence.js), so accept it here.
+        if (typeof params === 'function') {
+          error = success;
+          success = params;
+          params = [];
+        }
         enqueue(function() {
           return runSql(sql, params).then(function(rs) {
             if (typeof success === 'function') { success(rs); }
@@ -144,6 +151,10 @@
           });
         });
       },
+      // Cordova API. LingoLinq's sync calls it when its database check has not answered within
+      // a second (services/persistence.js). Statements here run in order on one queue, so there
+      // is nothing safe to cancel without risking a lost write: do nothing, and never throw.
+      abortAllPendingTransactions: function() {},
       transaction: function(fn, error, success) {
         enqueue(function() {
           var p = plugin();

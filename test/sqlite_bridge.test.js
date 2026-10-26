@@ -9,13 +9,20 @@ const vm = require('node:vm');
 
 const BRIDGE = fs.readFileSync(path.join(__dirname, '..', 'www', 'sqlite_bridge.js'), 'utf8');
 
-function loadBridge(queryValues) {
+function loadBridge(queryValues, calls, failQuery) {
   const plugin = {
     checkConnectionsConsistency: async () => ({ result: true }),
     closeConnection: async () => {},
     createConnection: async () => {},
     open: async () => {},
-    query: async () => ({ values: queryValues }),
+    // Like the real plugin, refuse anything but an array of values
+    // ("Query: Must provide an Array of value", seen on the iOS simulator).
+    query: async (opts) => {
+      if (calls) { calls.push(opts); }
+      if (!Array.isArray(opts.values)) { throw new Error('Query: Must provide an Array of value'); }
+      if (failQuery) { throw new Error('no such table: board'); }
+      return { values: queryValues };
+    },
     run: async () => ({ changes: { changes: 0 } })
   };
   const window = {
@@ -109,6 +116,49 @@ test('missing, non-array or null-first values do not throw', async () => {
     const expected = Array.isArray(values) ? values.length : 0;
     assert.equal(rs.rows.length, expected);
   }
+});
+
+// LingoLinq-AAC's sync checks the database with the short Cordova form
+// executeSql(sql, success, error) (app/frontend/app/services/persistence.js:2078).
+test('short form executeSql(sql, success, error) runs with no values and calls success', async () => {
+  const calls = [];
+  const sqlitePlugin = loadBridge([{ ios_columns: ['id'] }, { id: 1 }], calls);
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  const rs = await new Promise((resolve, reject) => {
+    db.executeSql('SELECT * FROM board LIMIT 1', resolve, reject);
+  });
+  assert.equal(rs.rows.length, 1);
+  assert.ok(Array.isArray(calls[0].values));
+  assert.equal(calls[0].values.length, 0);
+});
+
+test('short form executeSql calls its error callback (third argument) on failure', async () => {
+  const sqlitePlugin = loadBridge([], null, true);
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  const outcome = await new Promise((resolve) => {
+    db.executeSql('SELECT * FROM board LIMIT 1',
+      function() { resolve('success'); },
+      function(err) { resolve('error: ' + err.message); });
+  });
+  assert.equal(outcome, 'error: no such table: board');
+});
+
+test('full form with a non-array values argument reports through the error callback', async () => {
+  const sqlitePlugin = loadBridge([]);
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  const err = await new Promise((resolve) => {
+    db.executeSql('SELECT * FROM board', 'not-an-array', function() { resolve(null); }, resolve);
+  });
+  assert.ok(err && /Array/.test(err.message));
+});
+
+// The same sync check calls db.abortAllPendingTransactions() when the check is slow
+// (persistence.js:2088); it must exist and must not throw.
+test('abortAllPendingTransactions exists and does not throw', () => {
+  const sqlitePlugin = loadBridge([]);
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  assert.equal(typeof db.abortAllPendingTransactions, 'function');
+  assert.doesNotThrow(() => db.abortAllPendingTransactions());
 });
 
 test('empty result stays empty', async () => {
