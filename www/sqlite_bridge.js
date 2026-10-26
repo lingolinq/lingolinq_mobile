@@ -27,6 +27,14 @@
 
   function toResultSet(values) {
     var rows = Array.isArray(values) ? values : [];
+    // On iOS the plugin puts a column-list row ({ios_columns: [...]}) first in every
+    // non-empty query result (ios/Plugin/Utils/UtilsSQLCipher.swift); its own JS wrapper
+    // drops it (reorderRows in dist/plugin.js). This bridge calls the raw plugin, so drop it
+    // here. Android never sends it.
+    var first = rows[0];
+    if (first && typeof first === 'object' && Array.isArray(first.ios_columns)) {
+      rows = rows.slice(1);
+    }
     return {
       rows: {
         length: rows.length,
