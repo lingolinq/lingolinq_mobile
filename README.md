@@ -238,14 +238,16 @@ If Studio opens a Windows copy (e.g. `C:\Users\…\AndroidStudioProjects\lingoli
 - [x] Debug APK builds
 - [x] SQLite + Filesystem plugins + pre-Ember bridges for offline boards
 - [ ] Device/emulator login + board load against **local** Rails
-- [ ] Offline smoke (airplane + cold start + speak with local symbols)
-- [ ] iOS simulator smoke test (on a Mac)
+- [x] Offline smoke (airplane + cold start + speak with local symbols): Basic view on the iPad simulator and an API 36 Android emulator, app packaged from staging (October 2026)
+- [x] iOS simulator smoke test (on a Mac)
 - [x] Capacitor 8: `./gradlew assembleDebug bundleRelease` on SDK 36 (APK reports `targetSdkVersion:'36'`)
 - [x] Capacitor 8: 16 KB page-size check on the built APK (`zipalign -c -P 16 -v 4`, and every `libsqlcipher.so` ABI has 16 KB LOAD alignment)
 - [x] Capacitor 8: `npx cap sync ios` with CocoaPods; `npx cap doctor` passes for Android and iOS
-- [ ] Capacitor 8: Xcode 26 build (Xcode 26 needs macOS Sequoia 15.6 or later)
-- [ ] Capacitor 8: layout on Android 14 and on Android 15 or later (status bar, bottom button row, keyboard); Capacitor 8 now applies system-bar insets by default
-- [ ] Capacitor 8: first iOS cold launch logs "Loading app at" once, not twice (the UIScene template sets a scene storyboard and also builds its own window)
+- [x] Capacitor 8: Xcode build (built with Xcode 27.1; App Store Connect requires Xcode 26 or later)
+- [ ] Capacitor 8: layout on Android 14 and on Android 15 or later (status bar, bottom button row, keyboard); Capacitor 8 now applies system-bar insets by default. The top inset is tracked in lingolinq/LingoLinq-AAC#1202
+- Capacitor 8 raises the minimum OS to Android 7 (API 24) and iOS 15: Android 6 and iOS 14 devices get no further updates
+- `npm test` runs the SQLite bridge tests (Node's built-in runner); this repo has no CI, so run it before any change to `www/sqlite_bridge.js`
+- [x] Capacitor 8: first iOS cold launch logs "Loading app at" once, not twice (checked on iPad and iPhone simulators; the UIScene template sets a scene storyboard and also builds its own window)
 
 ## Deferred (not kickoff)
 
