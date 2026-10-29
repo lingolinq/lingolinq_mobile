@@ -22,6 +22,10 @@
     <string>$(CURRENT_PROJECT_VERSION)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>NSCameraUsageDescription</key>
+    <string>LingoLinq uses the camera to take pictures and videos for buttons and boards.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>LingoLinq uses the microphone to record sounds and videos for buttons and boards.</string>
     <key>UILaunchStoryboardName</key>
     <string>LaunchScreen</string>
     <key>UIMainStoryboardFile</key>
