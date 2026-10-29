@@ -51,7 +51,7 @@
   }
   setTimeout(checkState, 500);
 
-  window.app_version = window.app_version || "capacitor-7-kickoff";
+  window.app_version = window.app_version || "capacitor-8";
   // Capacitor does not use Cordova deviceReady; installed_app is set here before Ember boots.
   window.capabilities = {
     installed_app: true,

@@ -10,30 +10,33 @@
     "sync:ios": "npm run package && npx cap sync ios",
     "sync:ios:local": "npm run package:local && npx cap sync ios",
     "open:android": "npx cap open android",
-    "run:android": "npx cap run android"
+    "run:android": "npx cap run android",
+    "test": "node --test test/*.test.js"
   },
   "keywords": [],
   "author": "",
   "license": "AGPL-3.0-or-later",
-  "description": "LingoLinq Capacitor 7 native shell (Android/iOS)",
+  "description": "LingoLinq Capacitor 8 native shell (Android/iOS)",
   "dependencies": {
-    "@capacitor-community/sqlite": "^7.0.3",
-    "@capacitor-community/text-to-speech": "^6.1.0",
-    "@capacitor/android": "^7.6.8",
-    "@capacitor/app": "^7.1.2",
-    "@capacitor/browser": "^7.0.5",
-    "@capacitor/cli": "^7.6.8",
-    "@capacitor/clipboard": "^7.0.4",
-    "@capacitor/core": "^7.6.8",
-    "@capacitor/device": "^7.0.5",
-    "@capacitor/filesystem": "^7.1.8",
-    "@capacitor/ios": "^7.6.8",
-    "@capacitor/keyboard": "^7.0.6",
-    "@capacitor/network": "^7.0.4",
-    "@capacitor/preferences": "^7.0.4",
-    "@capacitor/share": "^7.0.4",
-    "@capacitor/splash-screen": "^7.0.5",
-    "@capacitor/status-bar": "^7.0.6"
+    "@capacitor-community/sqlite": "^8.1.1",
+    "@capacitor-community/text-to-speech": "^8.0.2",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/app": "^8.0.0",
+    "@capacitor/browser": "^8.0.0",
+    "@capacitor/clipboard": "^8.0.0",
+    "@capacitor/core": "^8.5.3",
+    "@capacitor/device": "^8.0.0",
+    "@capacitor/filesystem": "^8.0.0",
+    "@capacitor/ios": "^8.5.3",
+    "@capacitor/keyboard": "^8.0.0",
+    "@capacitor/network": "^8.0.0",
+    "@capacitor/preferences": "^8.0.0",
+    "@capacitor/share": "^8.0.0",
+    "@capacitor/splash-screen": "^8.0.0",
+    "@capacitor/status-bar": "^8.0.0"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.3"
+  }
 }
