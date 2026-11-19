@@ -62,24 +62,53 @@ test('a store sync does not grant navigation to local dev hosts', function() {
   }
 });
 
-test('android backup rules exclude database, files, and preferences', function() {
+function xmlSection(xml, tag) {
+  const match = xml.match(new RegExp('<' + tag + '>([\\s\\S]*?)</' + tag + '>'));
+  assert.ok(match, 'missing <' + tag + '>');
+  return match[1];
+}
+
+function assertExcluded(section, domain, filePath) {
+  const escaped = filePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  assert.match(
+    section,
+    new RegExp('<exclude domain="' + domain + '" path="' + escaped + '"\\s*/>'),
+    domain + ' ' + filePath
+  );
+}
+
+const BACKUP_EXCLUDES = [
+  ['database', '.'],
+  ['file', '.'],
+  ['sharedpref', '.'],
+  ['root', 'app_webview/']
+];
+
+test('android backup rules exclude database, files, preferences, and webview storage', function() {
   const manifest = read('android/app/src/main/AndroidManifest.xml');
   assert.match(manifest, /android:fullBackupContent="@xml\/backup_rules"/);
   assert.match(manifest, /android:dataExtractionRules="@xml\/data_extraction_rules"/);
   assert.match(manifest, /android:allowBackup="true"/);
+  assert.doesNotMatch(manifest, /android:allowBackup="false"/);
 
-  const full = read('android/app/src/main/res/xml/backup_rules.xml');
+  const full = xmlSection(read('android/app/src/main/res/xml/backup_rules.xml'), 'full-backup-content');
   const extraction = read('android/app/src/main/res/xml/data_extraction_rules.xml');
-  for (const domain of ['database', 'file', 'sharedpref']) {
-    assert.match(full, new RegExp('<exclude domain="' + domain + '" path="\\."'));
-    assert.match(extraction, new RegExp('<cloud-backup>[\\s\\S]*<exclude domain="' + domain + '" path="\\."'));
-    assert.match(extraction, new RegExp('<device-transfer>[\\s\\S]*<exclude domain="' + domain + '" path="\\."'));
+  const cloud = xmlSection(extraction, 'cloud-backup');
+  const transfer = xmlSection(extraction, 'device-transfer');
+  for (const pair of BACKUP_EXCLUDES) {
+    assertExcluded(full, pair[0], pair[1]);
+    assertExcluded(cloud, pair[0], pair[1]);
+    assertExcluded(transfer, pair[0], pair[1]);
   }
 });
 
 test('ios permission prompts are translated for the web app languages', function() {
   const project = read('ios/App/App.xcodeproj/project.pbxproj');
-  assert.match(project, /InfoPlist\.strings in Resources/);
+  const resources = project.match(/\/\* Begin PBXResourcesBuildPhase section \*\/([\s\S]*?)\/\* End PBXResourcesBuildPhase section \*\//);
+  assert.ok(resources, 'PBXResourcesBuildPhase');
+  const files = resources[1].match(/files = \(([\s\S]*?)\);/);
+  assert.ok(files, 'Resources files list');
+  assert.match(files[1], /B7E4A1C21FED79650016A002 \/\* InfoPlist\.strings in Resources \*\//);
   const plist = read('ios/App/App/Info.plist');
   for (const key of USAGE_KEYS) {
     assert.match(plist, new RegExp('<key>' + key + '</key>'));
