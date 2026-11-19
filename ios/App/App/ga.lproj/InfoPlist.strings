@@ -1,0 +1,3 @@
+NSCameraUsageDescription = "Úsáideann LingoLinq an ceamara chun pictiúir agus físeáin a ghlacadh do chnaipí agus do chláir chumarsáide.";
+NSMicrophoneUsageDescription = "Úsáideann LingoLinq an micreafón chun fuaimeanna agus físeáin a thaifeadadh do chnaipí agus do chláir chumarsáide, chun do chuid cainte a thiontú ina focail, agus chun aiseolas a sheolann tú a thaifeadadh.";
+NSSpeechRecognitionUsageDescription = "Úsáideann LingoLinq aithint cainte chun do chuid cainte a thiontú ina focail, mar shampla nuair a chruthaíonn tú cláir chumarsáide.";

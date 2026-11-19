@@ -1,0 +1,3 @@
+NSCameraUsageDescription = "LingoLinqは、ボタンやボード用の写真と動画を撮るためにカメラを使用します。";
+NSMicrophoneUsageDescription = "LingoLinqは、ボタンやボード用の音声と動画の録音、話し言葉を文字に変換すること、および送信するフィードバックの録音のためにマイクを使用します。";
+NSSpeechRecognitionUsageDescription = "LingoLinqは、たとえばボードを作るときに、話し言葉を文字に変換するために音声認識を使用します。";

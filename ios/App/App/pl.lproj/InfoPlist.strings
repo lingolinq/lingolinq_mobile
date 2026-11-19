@@ -1,0 +1,3 @@
+NSCameraUsageDescription = "LingoLinq używa aparatu, aby robić zdjęcia i nagrywać filmy do przycisków i tablic.";
+NSMicrophoneUsageDescription = "LingoLinq używa mikrofonu, aby nagrywać dźwięki i filmy do przycisków i tablic, zamieniać mowę na słowa oraz nagrywać opinię, którą wysyłasz.";
+NSSpeechRecognitionUsageDescription = "LingoLinq używa rozpoznawania mowy, aby zamieniać mowę na słowa, na przykład podczas tworzenia tablic.";
