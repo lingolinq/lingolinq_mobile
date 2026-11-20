@@ -415,3 +415,159 @@ test('a hung query inside a transaction fails the transaction and the next state
     t.mock.timers.reset();
   }
 });
+
+function loadWithTimers(plugin) {
+  return loadBridge(undefined, undefined, false, {
+    plugin: plugin,
+    setTimeout: setTimeout,
+    clearTimeout: clearTimeout
+  });
+}
+
+// A query still has a 60s deadline. Answering just before that must succeed, so a
+// deadline shortened to 1ms fails this test.
+test('a query that answers just before 60s succeeds', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const plugin = {
+      checkConnectionsConsistency: async () => ({ result: true }),
+      closeConnection: async () => {},
+      createConnection: async () => {},
+      open: async () => {},
+      query: () => new Promise((resolve) => {
+        setTimeout(() => resolve({ values: [{ id: 1 }] }), 59000);
+      }),
+      run: async () => ({ changes: { changes: 0 } })
+    };
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.executeSql('SELECT * FROM board', [], function(rs) { outcome = rs; }, function(err) { outcome = err; });
+    await nextTurn();
+    t.mock.timers.tick(59000);
+    await nextTurn();
+    assert.equal(outcome && outcome.rows && outcome.rows.item(0).id, 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+// Writes and commits have no deadline. The plugin holds the call, the same way a
+// device finishes one native call before the next. Ticking 60s must not report failure.
+test('a hung write waits, and succeeds when the plugin answers', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let release;
+    const { plugin } = recordingPlugin({
+      run: () => new Promise((resolve) => {
+        release = function() { resolve({ changes: { changes: 1 } }); };
+      })
+    });
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.executeSql('INSERT INTO board (id) VALUES (?)', [1],
+      function() { outcome = 'success'; },
+      function(err) { outcome = err; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    release();
+    await nextTurn();
+    assert.equal(outcome, 'success');
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung write inside a transaction waits, then commits', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let release;
+    const { plugin, log } = recordingPlugin({
+      run: () => new Promise((resolve) => {
+        release = function() { resolve({ changes: { changes: 1 } }); };
+      })
+    });
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.transaction(function(tx) {
+      tx.executeSql('INSERT INTO board (id) VALUES (?)', [1]);
+    }, function(err) { outcome = err; }, function() { outcome = 'success'; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    assert.equal(log.indexOf('rollback'), -1);
+    assert.equal(log.indexOf('commit'), -1);
+    release();
+    await nextTurn();
+    assert.equal(outcome, 'success');
+    assert.ok(log.indexOf('commit') !== -1);
+    assert.equal(log.indexOf('rollback'), -1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung beginTransaction fails the transaction and sends a rollback', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { plugin, log } = recordingPlugin();
+    plugin.beginTransaction = function() {
+      log.push('begin');
+      return new Promise(function() {});
+    };
+    plugin.rollbackTransaction = function() {
+      log.push('rollback');
+      return new Promise(function() {});
+    };
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM board', []);
+    }, function(err) { outcome = err; }, function() { outcome = 'success'; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    assert.ok(log.indexOf('begin') !== -1);
+    assert.ok(log.indexOf('rollback') !== -1);
+    // The error callback waits until the rollback call settles. That call also
+    // times out, so the caller hears the begin failure one deadline later.
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome && outcome.message, 'sqlite plugin call timed out: beginTransaction');
+    assert.equal(log.indexOf('commit'), -1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung commit waits, and does not roll back when the plugin answers', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let release;
+    const { plugin, log } = recordingPlugin();
+    plugin.commitTransaction = function() {
+      log.push('commit');
+      return new Promise(function(resolve) { release = resolve; });
+    };
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM board', []);
+    }, function(err) { outcome = err; }, function() { outcome = 'success'; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    assert.ok(log.indexOf('commit') !== -1);
+    assert.equal(log.indexOf('rollback'), -1);
+    release();
+    await nextTurn();
+    assert.equal(outcome, 'success');
+    assert.equal(log.indexOf('rollback'), -1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});

@@ -25,12 +25,13 @@
     return String(name || 'lingolinq').replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
-  // A native call that never settles would leave the caller's queue waiting, and every
-  // later read and write with it. Bound each plugin call. On timeout the caller's error
-  // callback runs and the queue moves on. The plugin has no cancel, so that call may
-  // still be in flight when the next statement closes and reopens the connection
-  // (openPromise cleared). abortAllPendingTransactions stays a no-op: cancelling a
-  // write that might still land is not safe.
+  // Capacitor runs plugin calls one at a time and cannot cancel one already in that
+  // queue. A query or beginTransaction that does not answer within 60s fails that
+  // caller. A write (run) or commitTransaction waits: reporting it failed, or sending
+  // a rollback after a commit, would be wrong when the native call still lands. A call
+  // that never returns still holds the native queue, so later calls wait behind it.
+  // On a read timeout the cached connection is dropped (openPromise cleared).
+  // abortAllPendingTransactions stays a no-op.
   var NATIVE_CALL_TIMEOUT_MS = 60000;
 
   function isTimeoutError(err) {
@@ -93,9 +94,14 @@
     // keepConnection: a timeout during the open preamble is swallowed by the caller,
     // and the open chain is still the promise stored in openPromise. Clearing it here
     // would let a second open start before the first chain finishes.
-    function callPlugin(p, method, args, keepConnection) {
-      var pending = withTimeout(p[method](args), method);
-      if (keepConnection) { return pending; }
+    // wait: run and commitTransaction have no deadline. A timeout cannot cancel them,
+    // and calling the error path would say a write failed when it may still apply.
+    function callPlugin(p, method, args, opts) {
+      opts = opts || {};
+      var pending = opts.wait
+        ? Promise.resolve(p[method](args))
+        : withTimeout(p[method](args), method);
+      if (opts.keepConnection) { return pending; }
       return pending.catch(function(err) {
         if (isTimeoutError(err)) { openPromise = null; }
         throw err;
@@ -116,7 +122,7 @@
             return callPlugin(p, 'checkConnectionsConsistency', {
               dbNames: [dbName],
               openModes: ['RW']
-            }, true).catch(function() {
+            }, { keepConnection: true }).catch(function() {
               return { result: false };
             });
           }
@@ -127,7 +133,7 @@
             return callPlugin(p, 'closeConnection', {
               database: dbName,
               readonly: false
-            }, true).catch(function() {});
+            }, { keepConnection: true }).catch(function() {});
           }
         })
         .then(function() {
@@ -174,7 +180,7 @@
           statement: sql,
           values: params,
           transaction: false
-        }).then(function() {
+        }, { wait: true }).then(function() {
           return toResultSet([]);
         });
       });
@@ -211,8 +217,8 @@
       // Cordova API. LingoLinq's sync calls it when its database check has not answered within
       // a second (services/persistence.js). Statements here run in order on one queue, so there
       // is nothing safe to cancel without risking a lost write: do nothing, and never throw.
-      // A call that never returns is bounded by the native-call timeout, which fails that
-      // call and lets the queue continue.
+      // A query or beginTransaction that never returns fails after the native-call timeout.
+      // A write or commit waits, because a timeout cannot cancel it.
       abortAllPendingTransactions: function() {},
       transaction: function(fn, error, success) {
         enqueue(function() {
@@ -264,7 +270,7 @@
             })
             .then(function() {
               if (typeof p.commitTransaction === 'function') {
-                return callPlugin(p, 'commitTransaction', { database: dbName });
+                return callPlugin(p, 'commitTransaction', { database: dbName }, { wait: true });
               }
             })
             .then(function() {
