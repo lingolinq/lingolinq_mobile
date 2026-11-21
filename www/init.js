@@ -67,4 +67,19 @@
     var list = elem.getAttribute('data-list') || '';
     window.enabled_frontend_features = list.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
   }
+
+  // Logged-out screens read domain_settings.enabled_frontend_features. The packaged
+  // window list stays empty so a store build cannot force flags over a signed-in user.
+  if(window.fetch) {
+    var prefix = (window.capabilities && window.capabilities.api_host) ? window.capabilities.api_host : '';
+    window.fetch(prefix + '/api/v1/domain_settings')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if(!data || !data.settings) { return; }
+        window.domain_settings = window.domain_settings || {};
+        Object.assign(window.domain_settings, data.settings);
+        window.dispatchEvent(new Event('lingolinq-domain-settings-sync'));
+      })
+      .catch(function() {});
+  }
 })();

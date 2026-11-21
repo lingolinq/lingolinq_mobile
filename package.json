@@ -10,7 +10,7 @@
     "sync:ios": "npm run package && npx cap sync ios",
     "sync:ios:local": "npm run package:local && npx cap sync ios",
     "open:android": "npx cap open android",
-    "run:android": "npx cap run android",
+    "run:android": "npm run package && npx cap run android",
     "test": "node --test test/*.test.js"
   },
   "keywords": [],
