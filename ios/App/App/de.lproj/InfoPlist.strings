@@ -1,0 +1,3 @@
+NSCameraUsageDescription = "LingoLinq verwendet die Kamera, um Fotos und Videos für Schaltflächen und Tafeln aufzunehmen.";
+NSMicrophoneUsageDescription = "LingoLinq verwendet das Mikrofon, um Töne und Videos für Schaltflächen und Tafeln aufzunehmen, gesprochene Sprache in Wörter umzuwandeln und Feedback aufzunehmen, das Sie senden.";
+NSSpeechRecognitionUsageDescription = "LingoLinq verwendet die Spracherkennung, um gesprochene Sprache in Wörter umzuwandeln, zum Beispiel beim Erstellen von Tafeln.";

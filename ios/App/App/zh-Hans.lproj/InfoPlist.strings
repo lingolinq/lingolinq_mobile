@@ -1,0 +1,3 @@
+NSCameraUsageDescription = "LingoLinq 使用相机为按钮和沟通板拍摄照片和视频。";
+NSMicrophoneUsageDescription = "LingoLinq 使用麦克风为按钮和沟通板录制声音和视频，将您说的话转成文字，并录制您发送的反馈。";
+NSSpeechRecognitionUsageDescription = "LingoLinq 使用语音识别将您说的话转成文字，例如在创建沟通板时。";

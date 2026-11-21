@@ -21,7 +21,10 @@
     return window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Filesystem;
   }
 
-  var DIRECTORY = 'DATA';
+  // LIBRARY_NO_CLOUD is excluded from iCloud backup (Capacitor Filesystem).
+  // On Android those files still sit in the app files directory; backup exclusion
+  // is android/app/src/main/res/xml/data_extraction_rules.xml.
+  var DIRECTORY = 'LIBRARY_NO_CLOUD';
 
   function joinPath() {
     var parts = [];
