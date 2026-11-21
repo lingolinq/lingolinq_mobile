@@ -1,0 +1,3 @@
+NSCameraUsageDescription = "O LingoLinq usa a câmara para tirar fotografias e gravar vídeos para botões e pranchas.";
+NSMicrophoneUsageDescription = "O LingoLinq usa o microfone para gravar sons e vídeos para botões e pranchas, transformar a sua fala em palavras e gravar o feedback que envia.";
+NSSpeechRecognitionUsageDescription = "O LingoLinq usa o reconhecimento de fala para transformar a sua fala em palavras, por exemplo ao criar pranchas.";

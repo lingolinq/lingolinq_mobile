@@ -6,9 +6,9 @@
     "package": "./bin/package_from_lingolinq",
     "package:local": "LINGOLINQ_API_HOST=http://localhost:5000 PACKAGE_SOURCE=prod ./bin/package_from_lingolinq",
     "sync:android": "npm run package && npx cap sync android",
-    "sync:android:local": "npm run package:local && npx cap sync android",
+    "sync:android:local": "npm run package:local && CAP_DEV_NAV=1 npx cap sync android",
     "sync:ios": "npm run package && npx cap sync ios",
-    "sync:ios:local": "npm run package:local && npx cap sync ios",
+    "sync:ios:local": "npm run package:local && CAP_DEV_NAV=1 npx cap sync ios",
     "open:android": "npx cap open android",
     "run:android": "npx cap run android",
     "test": "node --test test/*.test.js"
