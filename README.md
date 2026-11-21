@@ -121,21 +121,25 @@ npx cap sync android
 
 ### 4. Build / run
 
+Package before a device or store build. The app runs `www/app.js`, which loads after `www/index.html` and replaces the feature-flag list. An empty div does not stop that. `npm run package` copies the local LingoLinq assets and clears the forced list. `./gradlew` and `npx cap run` alone do not.
+
+`package:local` and `sync:*:local` download the production bundle. That bundle does not include this branch's flag change, so the login screen will not follow the server. Use `npm run package` (local assets) for this work.
+
 **Android**
 
 ```bash
+npm run package
 cd android && ./gradlew assembleDebug
 # APK: android/app/build/outputs/apk/debug/app-debug.apk
 
-# or
-npx cap open android
-npx cap run android
+# or package, then install
+npm run run:android
 ```
 
 **iOS (Mac only)**
 
 ```bash
-npm run sync:ios:local
+npm run sync:ios
 npx cap open ios
 # Build/run a simulator or device from Xcode
 ```
@@ -144,8 +148,8 @@ npx cap open ios
 
 Packaged `www/app.js` is a **snapshot**. After meaningful frontend changes:
 
-1. Land/build the change in `LingoLinq` (and use a full asset build, or keep `PACKAGE_SOURCE=prod` until local precompile is complete).
-2. Re-run `npm run sync:android:local` (or `:ios:local`).
+1. Land/build the change in `LingoLinq` with a full asset build (`ember build --environment production`, then Rails `assets:precompile`).
+2. Re-run `npm run package` (local assets), then `npx cap sync` for the platform. Do not use `PACKAGE_SOURCE=prod` for the feature-flag change.
 3. Rebuild/reinstall the native app.
 
 Bootstrap-only files you edit in **this** repo (`www/init.js`, `www/tts_bridge.js`, `www/index.html`) still need `npx cap sync …` after changes.
