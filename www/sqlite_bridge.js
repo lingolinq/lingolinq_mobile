@@ -25,6 +25,42 @@
     return String(name || 'lingolinq').replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
+  // Capacitor runs plugin calls one at a time and cannot cancel one already in that
+  // queue. A query or beginTransaction that does not answer within 60s fails that
+  // caller. A write (run) or commitTransaction waits: reporting it failed, or sending
+  // a rollback after a commit, would be wrong when the native call still lands. A call
+  // that never returns still holds the native queue, so later calls wait behind it.
+  // On a read timeout the cached connection is dropped (openPromise cleared).
+  // abortAllPendingTransactions stays a no-op.
+  var NATIVE_CALL_TIMEOUT_MS = 60000;
+
+  function isTimeoutError(err) {
+    return !!(err && typeof err.message === 'string' &&
+      err.message.indexOf('sqlite plugin call timed out:') === 0);
+  }
+
+  function withTimeout(promise, label) {
+    return new Promise(function(resolve, reject) {
+      var settled = false;
+      var timer = setTimeout(function() {
+        if (settled) { return; }
+        settled = true;
+        reject(new Error('sqlite plugin call timed out: ' + label));
+      }, NATIVE_CALL_TIMEOUT_MS);
+      Promise.resolve(promise).then(function(value) {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      }, function(err) {
+        if (settled) { return; }
+        settled = true;
+        clearTimeout(timer);
+        reject(err);
+      });
+    });
+  }
+
   function toResultSet(values) {
     var rows = Array.isArray(values) ? values : [];
     // On iOS the plugin puts a column-list row ({ios_columns: [...]}) first in every
@@ -45,10 +81,32 @@
     };
   }
 
+  var databases = {};
+  // Sanitized name -> function that drops that db's cached connection after a timeout
+  // on deleteDatabase, which does not run on the db queue.
+  var connectionResets = {};
+
   function makeDb(rawName) {
     var dbName = sanitizeDbName(rawName);
     var openPromise = null;
     var queue = Promise.resolve();
+
+    // keepConnection: a timeout during the open preamble is swallowed by the caller,
+    // and the open chain is still the promise stored in openPromise. Clearing it here
+    // would let a second open start before the first chain finishes.
+    // wait: run and commitTransaction have no deadline. A timeout cannot cancel them,
+    // and calling the error path would say a write failed when it may still apply.
+    function callPlugin(p, method, args, opts) {
+      opts = opts || {};
+      var pending = opts.wait
+        ? Promise.resolve(p[method](args))
+        : withTimeout(p[method](args), method);
+      if (opts.keepConnection) { return pending; }
+      return pending.catch(function(err) {
+        if (isTimeoutError(err)) { openPromise = null; }
+        throw err;
+      });
+    }
 
     function ensureOpen() {
       if (openPromise) { return openPromise; }
@@ -61,10 +119,10 @@
       openPromise = Promise.resolve()
         .then(function() {
           if (typeof p.checkConnectionsConsistency === 'function') {
-            return p.checkConnectionsConsistency({
+            return callPlugin(p, 'checkConnectionsConsistency', {
               dbNames: [dbName],
               openModes: ['RW']
-            }).catch(function() {
+            }, { keepConnection: true }).catch(function() {
               return { result: false };
             });
           }
@@ -72,11 +130,14 @@
         })
         .then(function(consistency) {
           if (consistency && consistency.result === false && typeof p.closeConnection === 'function') {
-            return p.closeConnection({ database: dbName, readonly: false }).catch(function() {});
+            return callPlugin(p, 'closeConnection', {
+              database: dbName,
+              readonly: false
+            }, { keepConnection: true }).catch(function() {});
           }
         })
         .then(function() {
-          return p.createConnection({
+          return callPlugin(p, 'createConnection', {
             database: dbName,
             version: 1,
             encrypted: false,
@@ -90,7 +151,7 @@
           });
         })
         .then(function() {
-          return p.open({ database: dbName, readonly: false });
+          return callPlugin(p, 'open', { database: dbName, readonly: false });
         })
         .catch(function(err) {
           openPromise = null;
@@ -106,7 +167,7 @@
       var isSelect = /^\s*SELECT\b/i.test(trimmed) || /^\s*PRAGMA\b/i.test(trimmed);
       return ensureOpen().then(function() {
         if (isSelect) {
-          return p.query({
+          return callPlugin(p, 'query', {
             database: dbName,
             statement: sql,
             values: params
@@ -114,16 +175,18 @@
             return toResultSet(res && res.values);
           });
         }
-        return p.run({
+        return callPlugin(p, 'run', {
           database: dbName,
           statement: sql,
           values: params,
           transaction: false
-        }).then(function() {
+        }, { wait: true }).then(function() {
           return toResultSet([]);
         });
       });
     }
+
+    connectionResets[dbName] = function() { openPromise = null; };
 
     function enqueue(fn) {
       var result = queue.then(fn, fn);
@@ -154,6 +217,8 @@
       // Cordova API. LingoLinq's sync calls it when its database check has not answered within
       // a second (services/persistence.js). Statements here run in order on one queue, so there
       // is nothing safe to cancel without risking a lost write: do nothing, and never throw.
+      // A query or beginTransaction that never returns fails after the native-call timeout.
+      // A write or commit waits, because a timeout cannot cancel it.
       abortAllPendingTransactions: function() {},
       transaction: function(fn, error, success) {
         enqueue(function() {
@@ -161,6 +226,12 @@
           var ops = [];
           var tx = {
             executeSql: function(sql, params, ok, fail) {
+              // Same short form as db.executeSql: executeSql(sql, success, error).
+              if (typeof params === 'function') {
+                fail = ok;
+                ok = params;
+                params = [];
+              }
               ops.push({ sql: sql, params: params || [], ok: ok, fail: fail });
             }
           };
@@ -173,28 +244,33 @@
           return ensureOpen()
             .then(function() {
               if (typeof p.beginTransaction === 'function') {
-                return p.beginTransaction({ database: dbName });
+                return callPlugin(p, 'beginTransaction', { database: dbName });
               }
             })
             .then(function() {
-              var chain = Promise.resolve();
-              ops.forEach(function(op) {
-                chain = chain.then(function() {
-                  return runSql(op.sql, op.params).then(function(rs) {
-                    if (typeof op.ok === 'function') { op.ok(tx, rs); }
-                  }, function(err) {
-                    if (typeof op.fail === 'function') {
-                      op.fail(tx, err && err.message ? err : { message: String(err) });
-                    }
-                    throw err;
-                  });
+              // A success callback may call tx.executeSql (Cordova / Web SQL). Those
+              // statements are pushed after this function starts, so walk the queue one
+              // statement at a time and look again after each callback. A statement
+              // error still rolls the transaction back; the error callback cannot
+              // continue it.
+              var index = 0;
+              function step() {
+                if (index >= ops.length) { return Promise.resolve(); }
+                var op = ops[index++];
+                return runSql(op.sql, op.params).then(function(rs) {
+                  if (typeof op.ok === 'function') { op.ok(tx, rs); }
+                  return step();
+                }, function(err) {
+                  var wrapped = err && err.message ? err : { message: String(err) };
+                  if (typeof op.fail === 'function') { op.fail(tx, wrapped); }
+                  throw wrapped;
                 });
-              });
-              return chain;
+              }
+              return step();
             })
             .then(function() {
               if (typeof p.commitTransaction === 'function') {
-                return p.commitTransaction({ database: dbName });
+                return callPlugin(p, 'commitTransaction', { database: dbName }, { wait: true });
               }
             })
             .then(function() {
@@ -203,7 +279,7 @@
             .catch(function(err) {
               var rollback = Promise.resolve();
               if (typeof p.rollbackTransaction === 'function') {
-                rollback = p.rollbackTransaction({ database: dbName }).catch(function() {});
+                rollback = callPlugin(p, 'rollbackTransaction', { database: dbName }).catch(function() {});
               }
               return rollback.then(function() {
                 if (typeof error === 'function') {
@@ -215,8 +291,6 @@
       }
     };
   }
-
-  var databases = {};
 
   window.sqlitePlugin = {
     openDatabase: function(opts, success, error) {
@@ -246,16 +320,23 @@
       }
       Promise.resolve()
         .then(function() {
-          return p.closeConnection({ database: dbName, readonly: false }).catch(function() {});
+          return withTimeout(
+            p.closeConnection({ database: dbName, readonly: false }),
+            'closeConnection'
+          ).catch(function() {});
         })
         .then(function() {
-          return p.deleteDatabase({ database: dbName });
+          return withTimeout(p.deleteDatabase({ database: dbName }), 'deleteDatabase');
         })
         .then(function() {
           delete databases[name];
+          delete connectionResets[dbName];
           if (typeof success === 'function') { success(); }
         })
         .catch(function(err) {
+          if (isTimeoutError(err) && connectionResets[dbName]) {
+            connectionResets[dbName]();
+          }
           if (typeof error === 'function') {
             error(err && err.message ? err : { message: String(err) });
           }

@@ -246,7 +246,7 @@ If Studio opens a Windows copy (e.g. `C:\Users\…\AndroidStudioProjects\lingoli
 - [x] Capacitor 8: Xcode build (built with Xcode 27.1; App Store Connect requires Xcode 26 or later)
 - [ ] Capacitor 8: layout on Android 14 and on Android 15 or later (status bar, bottom button row, keyboard); Capacitor 8 now applies system-bar insets by default. The top inset is tracked in lingolinq/LingoLinq-AAC#1202
 - Capacitor 8 raises the minimum OS to Android 7 (API 24) and iOS 15: Android 6 and iOS 14 devices get no further updates. The store listing requirements text should say Android 7 and iOS 15.
-- `npm test` runs the SQLite bridge tests (Node's built-in runner); this repo has no CI, so run it before any change to `www/sqlite_bridge.js`
+- `npm test` runs the SQLite bridge tests (Node's built-in runner). GitHub Actions (`.github/workflows/ci.yml`) runs that on pull requests and on pushes to `master`; still run it locally before any change to `www/sqlite_bridge.js`
 - [x] Capacitor 8: first iOS cold launch logs "Loading app at" once, not twice (checked on iPad and iPhone simulators; the UIScene template sets a scene storyboard and also builds its own window)
 
 ## Before the first store release

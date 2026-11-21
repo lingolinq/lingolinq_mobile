@@ -9,8 +9,9 @@ const vm = require('node:vm');
 
 const BRIDGE = fs.readFileSync(path.join(__dirname, '..', 'www', 'sqlite_bridge.js'), 'utf8');
 
-function loadBridge(queryValues, calls, failQuery) {
-  const plugin = {
+function loadBridge(queryValues, calls, failQuery, options) {
+  options = options || {};
+  const plugin = options.plugin || {
     checkConnectionsConsistency: async () => ({ result: true }),
     closeConnection: async () => {},
     createConnection: async () => {},
@@ -31,9 +32,54 @@ function loadBridge(queryValues, calls, failQuery) {
       Plugins: { CapacitorSQLite: plugin }
     }
   };
-  const context = vm.createContext({ window, console: { log() {} }, setTimeout, Promise });
+  const context = vm.createContext({
+    window,
+    console: { log() {} },
+    setTimeout: options.setTimeout || setTimeout,
+    clearTimeout: options.clearTimeout || clearTimeout,
+    Promise
+  });
   vm.runInContext(BRIDGE, context);
   return window.sqlitePlugin;
+}
+
+// Plugin double that records open / query / run / transaction calls in order.
+// handlers.query / handlers.run may return a result or a promise, or throw.
+function recordingPlugin(handlers) {
+  handlers = handlers || {};
+  const log = [];
+  function note(entry) { log.push(entry); }
+  const plugin = {
+    checkConnectionsConsistency: async () => ({ result: true }),
+    closeConnection: async () => { note('close'); },
+    createConnection: async () => { note('create'); },
+    open: async () => { note('open'); },
+    beginTransaction: async () => { note('begin'); },
+    commitTransaction: async () => { note('commit'); },
+    rollbackTransaction: async () => { note('rollback'); },
+    query: async (opts) => {
+      if (!Array.isArray(opts.values)) { throw new Error('Query: Must provide an Array of value'); }
+      note({ method: 'query', statement: opts.statement, values: opts.values });
+      if (handlers.query) { return handlers.query(opts); }
+      return { values: [] };
+    },
+    run: async (opts) => {
+      if (!Array.isArray(opts.values)) { throw new Error('Run: Must provide an Array of value'); }
+      note({ method: 'run', statement: opts.statement, values: opts.values });
+      if (handlers.run) { return handlers.run(opts); }
+      return { changes: { changes: 0 } };
+    }
+  };
+  return { plugin, log };
+}
+
+function sqlLog(log) {
+  return log.filter((entry) => entry === 'begin' || entry === 'commit' || entry === 'rollback' ||
+    (entry && entry.statement));
+}
+
+function nextTurn() {
+  return new Promise((resolve) => { setImmediate(resolve); });
 }
 
 function select(sqlitePlugin, sql) {
@@ -165,4 +211,363 @@ test('empty result stays empty', async () => {
   const sqlitePlugin = loadBridge([]);
   const rs = await select(sqlitePlugin, 'SELECT * FROM version');
   assert.equal(rs.rows.length, 0);
+});
+
+test('two statements queued in the transaction function both run, then it commits', async () => {
+  const { plugin, log } = recordingPlugin();
+  const sqlitePlugin = loadBridge(undefined, undefined, false, { plugin });
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  await new Promise((resolve, reject) => {
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM version', []);
+      tx.executeSql('SELECT * FROM board', []);
+    }, reject, resolve);
+  });
+  assert.deepEqual(sqlLog(log), [
+    'begin',
+    { method: 'query', statement: 'SELECT * FROM version', values: [] },
+    { method: 'query', statement: 'SELECT * FROM board', values: [] },
+    'commit'
+  ]);
+});
+
+test('a statement queued from a success callback runs before commit', async () => {
+  const { plugin, log } = recordingPlugin({
+    query: (opts) => {
+      if (opts.statement.indexOf('version') !== -1) { return { values: [{ version: '4' }] }; }
+      return { values: [] };
+    }
+  });
+  const sqlitePlugin = loadBridge(undefined, undefined, false, { plugin });
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  let seen = null;
+  await new Promise((resolve, reject) => {
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM version', [], function(_tx, rs) {
+        seen = rs.rows.item(0).version;
+        tx.executeSql('SELECT * FROM board', []);
+      });
+    }, reject, resolve);
+  });
+  assert.equal(seen, '4');
+  assert.deepEqual(sqlLog(log), [
+    'begin',
+    { method: 'query', statement: 'SELECT * FROM version', values: [] },
+    { method: 'query', statement: 'SELECT * FROM board', values: [] },
+    'commit'
+  ]);
+});
+
+test('a statement queued from a nested success callback runs before commit', async () => {
+  const { plugin, log } = recordingPlugin();
+  const sqlitePlugin = loadBridge(undefined, undefined, false, { plugin });
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  await new Promise((resolve, reject) => {
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM version', [], function() {
+        tx.executeSql('SELECT * FROM board', [], function() {
+          tx.executeSql('SELECT * FROM settings', []);
+        });
+      });
+    }, reject, resolve);
+  });
+  assert.deepEqual(sqlLog(log), [
+    'begin',
+    { method: 'query', statement: 'SELECT * FROM version', values: [] },
+    { method: 'query', statement: 'SELECT * FROM board', values: [] },
+    { method: 'query', statement: 'SELECT * FROM settings', values: [] },
+    'commit'
+  ]);
+});
+
+test('short form tx.executeSql(sql, success, error) runs with no values', async () => {
+  const { plugin, log } = recordingPlugin();
+  const sqlitePlugin = loadBridge(undefined, undefined, false, { plugin });
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  let called = false;
+  await new Promise((resolve, reject) => {
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM board', function() { called = true; });
+    }, reject, resolve);
+  });
+  assert.equal(called, true);
+  const entries = sqlLog(log);
+  assert.deepEqual(entries.map((entry) => entry.statement || entry), [
+    'begin',
+    'SELECT * FROM board',
+    'commit'
+  ]);
+  // The empty values array is created inside the bridge's VM, so compare length
+  // rather than the array object.
+  assert.equal(Array.isArray(entries[1].values), true);
+  assert.equal(entries[1].values.length, 0);
+});
+
+test('a failed statement rolls back and does not run later or error-callback statements', async () => {
+  const { plugin, log } = recordingPlugin({
+    query: (opts) => {
+      if (opts.statement.indexOf('missing') !== -1) { throw new Error('no such table: missing'); }
+      return { values: [] };
+    }
+  });
+  const sqlitePlugin = loadBridge(undefined, undefined, false, { plugin });
+  const db = sqlitePlugin.openDatabase({ name: 'test' });
+  const err = await new Promise((resolve) => {
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM missing', [], null, function(tx2) {
+        tx2.executeSql('SELECT * FROM queued_from_error', []);
+      });
+      tx.executeSql('SELECT * FROM board', []);
+    }, resolve, function() { resolve(null); });
+  });
+  assert.equal(err && err.message, 'no such table: missing');
+  assert.deepEqual(sqlLog(log), [
+    'begin',
+    { method: 'query', statement: 'SELECT * FROM missing', values: [] },
+    'rollback'
+  ]);
+});
+
+// The bridge's native-call timeout is 60s. These tests pass Node's fake timers into the
+// VM so the hang fails without waiting. A following statement is queued before the tick,
+// which is the case that used to wait forever.
+test('a hung query fails its caller and the next statement still runs', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let releaseHung;
+    const calls = [];
+    const { plugin, log } = recordingPlugin({
+      query: (opts) => {
+        if (opts.statement.indexOf('HANG') !== -1) {
+          return new Promise((resolve) => {
+            releaseHung = function() { resolve({ values: [{ id: 9 }] }); };
+          });
+        }
+        return { values: [{ id: 1 }] };
+      }
+    });
+    const sqlitePlugin = loadBridge(undefined, undefined, false, {
+      plugin: plugin,
+      setTimeout: setTimeout,
+      clearTimeout: clearTimeout
+    });
+    const db = sqlitePlugin.openDatabase({ name: 'test' });
+    const first = new Promise((resolve) => {
+      db.executeSql('SELECT HANG', [], function() { calls.push('success'); resolve('success'); }, function(err) {
+        calls.push('error');
+        resolve(err);
+      });
+    });
+    const second = new Promise((resolve, reject) => {
+      db.executeSql('SELECT * FROM board', [], resolve, reject);
+    });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    const err = await first;
+    const rs = await second;
+    assert.equal(err.message, 'sqlite plugin call timed out: query');
+    assert.equal(rs.rows.item(0).id, 1);
+    assert.equal(log.filter((entry) => entry === 'open').length, 2);
+    releaseHung();
+    await nextTurn();
+    assert.deepEqual(calls, ['error']);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung query inside a transaction fails the transaction and the next statement still runs', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { plugin, log } = recordingPlugin({
+      query: (opts) => {
+        if (opts.statement.indexOf('HANG') !== -1) { return new Promise(function() {}); }
+        return { values: [{ id: 1 }] };
+      }
+    });
+    const sqlitePlugin = loadBridge(undefined, undefined, false, {
+      plugin: plugin,
+      setTimeout: setTimeout,
+      clearTimeout: clearTimeout
+    });
+    const db = sqlitePlugin.openDatabase({ name: 'test' });
+    const first = new Promise((resolve) => {
+      db.transaction(function(tx) {
+        tx.executeSql('SELECT HANG', []);
+      }, function(err) { resolve(err); }, function() { resolve('success'); });
+    });
+    const second = new Promise((resolve, reject) => {
+      db.executeSql('SELECT * FROM board', [], resolve, reject);
+    });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    const err = await first;
+    const rs = await second;
+    assert.equal(err.message, 'sqlite plugin call timed out: query');
+    assert.equal(rs.rows.item(0).id, 1);
+    assert.deepEqual(sqlLog(log), [
+      'begin',
+      { method: 'query', statement: 'SELECT HANG', values: [] },
+      'rollback',
+      { method: 'query', statement: 'SELECT * FROM board', values: [] }
+    ]);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+function loadWithTimers(plugin) {
+  return loadBridge(undefined, undefined, false, {
+    plugin: plugin,
+    setTimeout: setTimeout,
+    clearTimeout: clearTimeout
+  });
+}
+
+// A query still has a 60s deadline. Answering just before that must succeed, so a
+// deadline shortened to 1ms fails this test.
+test('a query that answers just before 60s succeeds', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const plugin = {
+      checkConnectionsConsistency: async () => ({ result: true }),
+      closeConnection: async () => {},
+      createConnection: async () => {},
+      open: async () => {},
+      query: () => new Promise((resolve) => {
+        setTimeout(() => resolve({ values: [{ id: 1 }] }), 59000);
+      }),
+      run: async () => ({ changes: { changes: 0 } })
+    };
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.executeSql('SELECT * FROM board', [], function(rs) { outcome = rs; }, function(err) { outcome = err; });
+    await nextTurn();
+    t.mock.timers.tick(59000);
+    await nextTurn();
+    assert.equal(outcome && outcome.rows && outcome.rows.item(0).id, 1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+// Writes and commits have no deadline. The plugin holds the call, the same way a
+// device finishes one native call before the next. Ticking 60s must not report failure.
+test('a hung write waits, and succeeds when the plugin answers', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let release;
+    const { plugin } = recordingPlugin({
+      run: () => new Promise((resolve) => {
+        release = function() { resolve({ changes: { changes: 1 } }); };
+      })
+    });
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.executeSql('INSERT INTO board (id) VALUES (?)', [1],
+      function() { outcome = 'success'; },
+      function(err) { outcome = err; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    release();
+    await nextTurn();
+    assert.equal(outcome, 'success');
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung write inside a transaction waits, then commits', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let release;
+    const { plugin, log } = recordingPlugin({
+      run: () => new Promise((resolve) => {
+        release = function() { resolve({ changes: { changes: 1 } }); };
+      })
+    });
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.transaction(function(tx) {
+      tx.executeSql('INSERT INTO board (id) VALUES (?)', [1]);
+    }, function(err) { outcome = err; }, function() { outcome = 'success'; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    assert.equal(log.indexOf('rollback'), -1);
+    assert.equal(log.indexOf('commit'), -1);
+    release();
+    await nextTurn();
+    assert.equal(outcome, 'success');
+    assert.ok(log.indexOf('commit') !== -1);
+    assert.equal(log.indexOf('rollback'), -1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung beginTransaction fails the transaction and sends a rollback', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const { plugin, log } = recordingPlugin();
+    plugin.beginTransaction = function() {
+      log.push('begin');
+      return new Promise(function() {});
+    };
+    plugin.rollbackTransaction = function() {
+      log.push('rollback');
+      return new Promise(function() {});
+    };
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM board', []);
+    }, function(err) { outcome = err; }, function() { outcome = 'success'; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    assert.ok(log.indexOf('begin') !== -1);
+    assert.ok(log.indexOf('rollback') !== -1);
+    // The error callback waits until the rollback call settles. That call also
+    // times out, so the caller hears the begin failure one deadline later.
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome && outcome.message, 'sqlite plugin call timed out: beginTransaction');
+    assert.equal(log.indexOf('commit'), -1);
+  } finally {
+    t.mock.timers.reset();
+  }
+});
+
+test('a hung commit waits, and does not roll back when the plugin answers', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    let release;
+    const { plugin, log } = recordingPlugin();
+    plugin.commitTransaction = function() {
+      log.push('commit');
+      return new Promise(function(resolve) { release = resolve; });
+    };
+    const db = loadWithTimers(plugin).openDatabase({ name: 'test' });
+    let outcome = null;
+    db.transaction(function(tx) {
+      tx.executeSql('SELECT * FROM board', []);
+    }, function(err) { outcome = err; }, function() { outcome = 'success'; });
+    await nextTurn();
+    t.mock.timers.tick(60000);
+    await nextTurn();
+    assert.equal(outcome, null);
+    assert.ok(log.indexOf('commit') !== -1);
+    assert.equal(log.indexOf('rollback'), -1);
+    release();
+    await nextTurn();
+    assert.equal(outcome, 'success');
+    assert.equal(log.indexOf('rollback'), -1);
+  } finally {
+    t.mock.timers.reset();
+  }
 });
