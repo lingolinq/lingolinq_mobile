@@ -68,8 +68,9 @@
     window.enabled_frontend_features = list.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
   }
 
-  // Logged-out screens read domain_settings.enabled_frontend_features. The packaged
-  // window list stays empty so a store build cannot force flags over a signed-in user.
+  // When the server sends enabled_frontend_features, logged-out screens use it.
+  // Until then they keep the compiled window list, which includes emergency_boards
+  // (Basic Access). A signed-in user ignores that list. Do not blank it here.
   if(window.fetch) {
     var prefix = (window.capabilities && window.capabilities.api_host) ? window.capabilities.api_host : '';
     window.fetch(prefix + '/api/v1/domain_settings')
