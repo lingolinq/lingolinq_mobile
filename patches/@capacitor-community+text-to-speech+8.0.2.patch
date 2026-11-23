@@ -1,0 +1,88 @@
+diff --git a/node_modules/@capacitor-community/text-to-speech/ios/Sources/TextToSpeechPlugin/TextToSpeech.swift b/node_modules/@capacitor-community/text-to-speech/ios/Sources/TextToSpeechPlugin/TextToSpeech.swift
+index 7c19904..de2b59a 100644
+--- a/node_modules/@capacitor-community/text-to-speech/ios/Sources/TextToSpeechPlugin/TextToSpeech.swift
++++ b/node_modules/@capacitor-community/text-to-speech/ios/Sources/TextToSpeechPlugin/TextToSpeech.swift
+@@ -8,11 +8,19 @@ enum QUEUE_STRATEGY: Int {
+ @objc public class TextToSpeech: NSObject, AVSpeechSynthesizerDelegate {
+     let synthesizer = AVSpeechSynthesizer()
+     var calls: [CAPPluginCall] = []
++    // True while speak() is between a flush and enqueueing the new call, so a
++    // synchronous or cross-thread cancel cannot deactivate the session that
++    // utterance is about to use.
++    var holdSession = false
+     let queue = DispatchQueue(label: "backgroundAudioSetup", qos: .userInitiated, attributes: [], autoreleaseFrequency: .inherit, target: nil)
+ 
+     override init() {
+         super.init()
+-        self.synthesizer.usesApplicationAudioSession = false
++        // The app session is what makes `category` take effect. A private
++        // session (usesApplicationAudioSession = false) ignores it, so speech
++        // can be silenced by the iOS Ring/Silent switch and can miss
++        // Bluetooth and CarPlay routes.
++        self.synthesizer.usesApplicationAudioSession = true
+         self.synthesizer.delegate = self
+     }
+ 
+@@ -25,10 +33,21 @@ enum QUEUE_STRATEGY: Int {
+     }
+ 
+     @objc public func speak(_ text: String, _ lang: String, _ rate: Float, _ pitch: Float, _ category: String, _ volume: Float, _ voice: Int, _ queueStrategy: Int, _ call: CAPPluginCall) throws {
++        holdSession = true
+         if queueStrategy == QUEUE_STRATEGY.QUEUE_FLUSH.rawValue {
+             self.synthesizer.stopSpeaking(at: .immediate)
+         }
++        do {
++            // Before enqueueing, so a session error rejects this call instead
++            // of leaving it stuck in `calls`.
++            try configureAudioSession(category)
++        } catch {
++            holdSession = false
++            releaseAudioSessionIfIdle()
++            throw error
++        }
+         self.calls.append(call)
++        holdSession = false
+ 
+         let utterance = AVSpeechUtterance(string: text)
+         utterance.voice = AVSpeechSynthesisVoice(language: lang)
+@@ -50,6 +69,7 @@ enum QUEUE_STRATEGY: Int {
+ 
+     @objc public func stop() {
+         synthesizer.stopSpeaking(at: .immediate)
++        releaseAudioSessionIfIdle()
+     }
+ 
+     @objc public func getSupportedLanguages() -> [String] {
+@@ -72,11 +92,32 @@ enum QUEUE_STRATEGY: Int {
+         return rate * baseRate
+     }
+ 
++    // `playback` stays audible with the Ring/Silent switch on. `ambient` is
++    // the plugin's documented default and does follow that switch.
++    // `.duckOthers` lowers other audio for the utterance; the session is
++    // deactivated when the queue drains so that audio returns to full volume.
++    @objc private func configureAudioSession(_ category: String) throws {
++        let session = AVAudioSession.sharedInstance()
++        if category == "playback" {
++            try session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
++        } else {
++            try session.setCategory(.ambient, mode: .spokenAudio, options: [.mixWithOthers])
++        }
++        try session.setActive(true)
++    }
++
++    @objc private func releaseAudioSessionIfIdle() {
++        guard calls.isEmpty, !holdSession else { return }
++        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
++    }
++
+     @objc private func resolveCurrentCall() {
+         guard let call = calls.first else {
++            releaseAudioSessionIfIdle()
+             return
+         }
+         call.resolve()
+         calls.removeFirst()
++        releaseAudioSessionIfIdle()
+     }
+ }

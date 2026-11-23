@@ -1,7 +1,10 @@
 /**
- * Android System WebView does not implement a working Web Speech API
- * (speechSynthesis.speak is a no-op / empty voices). Cordova used
- * cordova-plugin-tts; Capacitor uses @capacitor-community/text-to-speech.
+ * Routes speak() through @capacitor-community/text-to-speech on the native
+ * shell (Android and iOS). Android System WebView does not implement a
+ * working Web Speech API (speechSynthesis.speak is a no-op / empty voices).
+ * On iOS this bridge is what speaks a button. It asks for category
+ * "playback" so speech stays audible when the Ring/Silent switch is on.
+ * The iOS plugin only honors that category because of the patch in patches/.
  *
  * speecher.js uses `scope: (window.polyspeech || window)`. Setting
  * window.polyspeech *before* app.js loads routes speak() through this bridge

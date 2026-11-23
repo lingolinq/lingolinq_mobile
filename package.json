@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "main": "index.js",
   "scripts": {
+    "postinstall": "patch-package",
     "package": "./bin/package_from_lingolinq",
     "package:local": "LINGOLINQ_API_HOST=http://localhost:5000 PACKAGE_SOURCE=prod ./bin/package_from_lingolinq",
     "sync:android": "npm run package && npx cap sync android",
@@ -37,6 +38,7 @@
   },
   "private": true,
   "devDependencies": {
-    "@capacitor/cli": "^8.5.3"
+    "@capacitor/cli": "^8.5.3",
+    "patch-package": "^8.0.1"
   }
 }
