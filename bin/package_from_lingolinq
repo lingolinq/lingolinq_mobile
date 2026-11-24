@@ -35,8 +35,9 @@ cp "$LL"/public/locales/* "$WWW/locales/" 2>/dev/null || true
 
 package_from_local() {
   local js css
-  js="$(ls "$LL"/public/assets/application-*.js 2>/dev/null | head -1 || true)"
-  css="$(ls "$LL"/public/assets/application-*.css 2>/dev/null | head -1 || true)"
+  # Newest digest, not the first name. A leftover application-*.js sorts ahead of the build just made.
+  js="$(ls -t "$LL"/public/assets/application-*.js 2>/dev/null | head -1 || true)"
+  css="$(ls -t "$LL"/public/assets/application-*.css 2>/dev/null | head -1 || true)"
   if [[ -z "${js:-}" || -z "${css:-}" ]]; then
     echo "Missing public/assets/application-*.{js,css} in $LL — run a production asset build, or PACKAGE_SOURCE=prod." >&2
     exit 1
@@ -141,4 +142,7 @@ if 'ember-application-root' not in html:
 print('bootstrap checks OK; api_host =', api_host)
 PY
 
-echo "Next: npx cap sync android   (or npm run sync:android / sync:android:local)"
+python3 "$ROOT/bin/require_feature_flag_fix.py" "$WWW/app.js"
+echo "signed-in flag fix present; compiled list kept for logged-out screens"
+
+echo "Next: npm run sync:android or npm run run:android (both package first)"

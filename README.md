@@ -121,21 +121,27 @@ npx cap sync android
 
 ### 4. Build / run
 
+Package before a device or store build. `npm run package` copies the local LingoLinq assets and refuses a bundle that has no `resolve_feature_flags` (LingoLinq-AAC #1347). That function is what stops a signed-in user's flags being forced on. The compiled flag list stays in the bundle so a logged-out screen still has Basic Access, including offline. `./gradlew` and `npx cap run` alone do not run this check.
+
+With no host set, `npm run package`, `npm run run:android`, and `npm run sync:ios` point the app at the production API. For a local Rails server pass `LINGOLINQ_API_HOST=http://localhost:5000`. On the Android emulator without `adb reverse`, use `http://10.0.2.2:5000`.
+
+`package:local` and `sync:*:local` download the production bundle. Packaging that bundle fails until #1347 is in it.
+
 **Android**
 
 ```bash
+LINGOLINQ_API_HOST=http://localhost:5000 npm run package
 cd android && ./gradlew assembleDebug
 # APK: android/app/build/outputs/apk/debug/app-debug.apk
 
-# or
-npx cap open android
-npx cap run android
+# or package, then install (set LINGOLINQ_API_HOST the same way)
+LINGOLINQ_API_HOST=http://localhost:5000 npm run run:android
 ```
 
 **iOS (Mac only)**
 
 ```bash
-npm run sync:ios:local
+LINGOLINQ_API_HOST=http://localhost:5000 npm run sync:ios
 npx cap open ios
 # Build/run a simulator or device from Xcode
 ```
@@ -144,8 +150,8 @@ npx cap open ios
 
 Packaged `www/app.js` is a **snapshot**. After meaningful frontend changes:
 
-1. Land/build the change in `LingoLinq` (and use a full asset build, or keep `PACKAGE_SOURCE=prod` until local precompile is complete).
-2. Re-run `npm run sync:android:local` (or `:ios:local`).
+1. Land/build the change in `LingoLinq` with a full asset build (`ember build --environment production`, then Rails `assets:precompile`).
+2. Re-run `LINGOLINQ_API_HOST=http://localhost:5000 npm run package`, then `npx cap sync` for the platform. Do not use `PACKAGE_SOURCE=prod` until that bundle contains `resolve_feature_flags`.
 3. Rebuild/reinstall the native app.
 
 Bootstrap-only files you edit in **this** repo (`www/init.js`, `www/tts_bridge.js`, `www/index.html`) still need `npx cap sync …` after changes.
